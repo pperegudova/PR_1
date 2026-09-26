@@ -1,0 +1,4 @@
+ls
+cd "папка с пробелами"
+invalid_cmd
+ls -l
