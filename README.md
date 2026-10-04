@@ -1,13 +1,13 @@
-# Эмулятор оболочки ОС (Этап 1-3, Вариант 13)
+# Эмулятор оболочки ОС (Этап 1-4, Вариант 13)
 
 ---
 
 ## 1. Общее описание
 
 Программа имитирует работу командной строки UNIX-подобной ОС через 
-графический интерфейс (GUI) на базе библиотеки `Tkinter`. На Этапе 3 
-реализована полноценная виртуальная файловая система (VFS), работающая 
-исключительно в оперативной памяти.
+графический интерфейс (GUI) на базе библиотеки `Tkinter`. На Этапе 4 
+реализована полноценная логика команд навигации по VFS и добавлены 
+новые команды для работы с файлами и системным временем.
 
 ### Основные особенности и реализованные требования Этапа 1:
 - Графический интерфейс пользователя (GUI).
@@ -37,6 +37,18 @@
   вложенностью (3 уровня).
 - Заголовок окна формируется динамически на основе имени файла VFS.
 
+### Основные особенности и реализованные требования Этапа 4:
+- Реализована полноценная логика команды `ls` с флагами `-l` (длинный 
+  формат с типом и размером) и `-a` (показ скрытых файлов).
+- Реализована полноценная логика команды `cd` с переходом в корень 
+  при отсутствии аргументов.
+- Реализована команда `uniq` для фильтрации повторяющихся строк в 
+  файле VFS с флагом `-c` (подсчёт повторений).
+- Реализована команда `date` с выводом текущего времени, флагом `-u` 
+  (UTC) и поддержкой пользовательского формата через `+`.
+- Добавлена обработка неизвестных флагов для всех команд.
+- Создан стартовый скрипт для тестирования всех команд этапа.
+
 ---
 
 ## 2. Описание всех функций и настроек
@@ -46,6 +58,10 @@
 * `UI_WIDTH` (60) — ширина текстовой области GUI в символах.
 * `UI_HEIGHT` (20) — высота текстовой области GUI в строках.
 * `PROMPT` ("$ ") — символ приглашения к вводу, отображаемый в истории команд.
+* `LS_LONG` ("-l") — флаг длинного формата для команды `ls`.
+* `LS_ALL` ("-a") — флаг показа скрытых файлов для команды `ls`.
+* `UNIQ_COUNT` ("-c") — флаг подсчёта повторений для команды `uniq`.
+* `DATE_UTC` ("-u") — флаг UTC времени для команды `date`.
 
 ### Описание функций (`src/main.py`)
 
@@ -57,6 +73,14 @@
 - **`load_vfs(xml_path)`**  
   Загружает VFS из XML-файла в память. Возвращает корневой узел дерева 
   или `None` при ошибке (файл не найден, неверный формат).
+
+- **`_parse_ls_args(args: list) -> tuple`**  
+  Парсит аргументы команды `ls`, разделяя флаги и путь. Возвращает 
+  кортеж `(flags, path)`.
+
+- **`_parse_uniq_args(args: list) -> tuple`**  
+  Парсит аргументы команды `uniq`, разделяя флаги и путь к файлу. 
+  Возвращает кортеж `(flags, path)`.
 
 - **`parse_command(raw_input: str) -> list`**  
   Разбирает строку ввода пользователя на список аргументов с помощью 
@@ -74,14 +98,15 @@
 
 - **`ShellEmulator.__init__(root: tk.Tk)`**  
   Инициализирует графический интерфейс Tkinter, устанавливает заголовок 
-  окна и регистрирует поддерживаемые команды (`ls`, `cd`, `exit`).
+  окна и регистрирует поддерживаемые команды.
 
 - **`ShellEmulator._setup_ui()`**  
   Создает текстовое поле с прокруткой (`ScrolledText`) для вывода результатов 
   и однострочное поле ввода (`Entry`) для команд.
 
 - **`ShellEmulator._register_commands()`**  
-  Регистрирует словарь поддерживаемых команд (`ls`, `cd`, `exit`).
+  Регистрирует словарь поддерживаемых команд (`ls`, `cd`, `uniq`, 
+  `date`, `exit`).
 
 - **`ShellEmulator._print_debug_info()`**  
   Выводит в окно эмулятора отладочные сообщения о загруженных путях VFS и скрипта.
@@ -107,12 +132,35 @@
   об ошибке.
 
 - **`ShellEmulator._ls_cmd(name: str, args: list) -> bool`**  
-  Выводит содержимое указанной директории VFS. Для каждой записи отображает 
-  тип (d — директория, - — файл) и имя.
+  Выводит содержимое указанной директории VFS. Поддерживает флаги `-l` 
+  (длинный формат) и `-a` (скрытые файлы). Проверяет корректность флагов.
+
+- **`ShellEmulator._format_ls_long(node: VFSNode) -> str`**  
+  Форматирует узел VFS для вывода в длинном формате `ls -l` 
+  (тип, размер в байтах, имя).
 
 - **`ShellEmulator._cd_cmd(name: str, args: list) -> bool`**  
   Меняет текущую директорию в VFS. Поддерживает абсолютные и относительные 
-  пути.
+  пути. При вызове без аргументов переходит в корень.
+
+- **`ShellEmulator._uniq_cmd(name: str, args: list) -> bool`**  
+  Читает файл из VFS и выводит уникальные подряд идущие строки. 
+  Поддерживает флаг `-c` (подсчёт повторений). Проверяет корректность флагов.
+
+- **`ShellEmulator._process_uniq(lines: list, flags: list) -> list`**  
+  Обрабатывает список строк по логике `uniq`, учитывая флаг `-c`.
+
+- **`ShellEmulator._format_uniq_line(line: str, count: int, count_flag: bool) -> str`**  
+  Форматирует одну строку для вывода `uniq`. Если `count_flag=True`, 
+  добавляет счётчик повторений.
+
+- **`ShellEmulator._date_cmd(name: str, args: list) -> bool`**  
+  Выводит текущую дату и время системы. Поддерживает флаг `-u` (UTC) 
+  и пользовательский формат через `+` (например, `date "+%Y-%m-%d"`). 
+  Проверяет корректность флагов.
+
+- **`ShellEmulator._get_date_format(args: list) -> str`**  
+  Извлекает пользовательский формат даты из аргументов после символа `+`.
 
 - **`ShellEmulator._exit_cmd(name: str, args: list)`**  
   Завершает выполнение приложения и закрывает окно Tkinter.
@@ -136,9 +184,9 @@
   python3 main.py --config config.toml --script custom_script.txt
   ```
   
-- **Запуск напрямую с параметрами VFS и скрипта, содержащего все команды, реализованные до 3 этапа:**
+- **Запуск напрямую с параметрами VFS и скрипта, содержащего все команды, реализованные до 4 этапа:**
   ```bash
-  python3 src/main.py --vfs tests/vfs_deep.xml --script tests/script_stage3.txt
+  python3 src/main.py --vfs tests/vfs_files_stage4.xml --script tests/script_stage4.txt
   ```
 
 ### Запуск модульных тестов
@@ -162,6 +210,11 @@ bash tests/test_cli.sh
 bash tests/test_vfs.sh
 ```
 
+Запуск автоматических тестов VFS (Этап 4):
+
+```bash
+bash tests/test_vfs_stage4.sh
+```
 ---
 
 ## 4. Примеры использования
@@ -169,85 +222,177 @@ bash tests/test_vfs.sh
 ### 1. Пример файла конфигурации (`config.toml`)
 
 ```text
-vfs_path = "./tests/vfs_deep.xml"
-script_path = "./tests/script_stage3.txt"
+vfs_path = "./tests/vfs_files_stage4.xml"
+script_path = "./tests/script_stage4.txt"
 ```
 
-### 2. Выполнение стартового скрипта (`script_stage3.txt`)
-**Содержимое файла `script_stage3.txt`:**
+### 2. Выполнение стартового скрипта (`script_stage4.txt`)
+**Содержимое файла `script_stage4.txt`:**
 ```text
 ls
-cd level1
-ls
-cd level2
-cd level3
+ls -l
+ls -a
+
+cd docs
 ls
 cd ..
-cd ..
-cd ..
 ls
+cd /
+cd
+ls
+
+uniq uniq_test.txt
+uniq -c uniq_test.txt
+
+date
+date -u
+date "+%Y-%m-%d"
+date "+%H:%M:%S"
+date -u "+%Y-%m-%d %H:%M:%S"
 ```
 **Вывод в графическом окне эмулятора при запуске (использовалась команда: `python3 src/main.py --config config.toml`):**
 ```text
 --- Отладочный вывод ---
-VFS Path: ./tests/vfs_deep.xml
-Script Path: ./tests/script_stage3.txt
+VFS Path: tests/vfs_files_stage4.xml
+Script Path: tests/script_stage4.txt
 ------------------
-Запуск стартового скрипта: ./tests/script_stage3.txt
+Запуск стартового скрипта: tests/script_stage4.txt
 $ ls
-d level1
-$ cd level1
+data.bin
+docs
+readme.txt
+uniq_test.txt
+$ ls -l
+-      6 data.bin
+d      0 docs
+-     12 readme.txt
+-     35 uniq_test.txt
+$ ls -a
+.hidden_file
+data.bin
+docs
+readme.txt
+uniq_test.txt
+$ cd docs
 $ ls
-d level2
-$ cd level2
-$ cd level3
-$ ls
-- deep_secret.txt
+info.txt
 $ cd ..
-$ cd ..
-$ cd ..
 $ ls
-d level1
+data.bin
+docs
+readme.txt
+uniq_test.txt
+$ cd /
+$ cd
+$ ls
+data.bin
+docs
+readme.txt
+uniq_test.txt
+$ uniq uniq_test.txt
+line1
+line2
+line3
+$ uniq -c uniq_test.txt
+      2 line1
+      3 line2
+      1 line3
+$ date
+Sun Oct 04 21:22:38  2026
+$ date -u
+Sun Oct 04 18:22:38 UTC 2026
+$ date "+%Y-%m-%d"
+2026-10-04
+$ date "+%H:%M:%S"
+21:22:38
+$ date -u "+%Y-%m-%d %H:%M:%S"
+2026-10-04 18:22:38
 ```
 
 ### 3. Остановка скрипта при первой ошибке
-**Если в `script_stage3.txt` присутствует неизвестная команда или несуществующая директория:**
+**Если в `script_stage4.txt` присутствует неизвестная команда или несуществующая директория или несуществующий флаг:**
 ```text
 ls
-cd level1
-ls
-cd level2
-cd level3
+ls -l
+ls -a
+
+cd docs
 ls
 cd ..
-cd ..
-cd ..
 ls
-cd non_existent_dir
-ls /invalid/path
+cd /
+cd
+ls
+
+uniq uniq_test.txt
+uniq -c uniq_test.txt
+
+date
+date -u
+date "+%Y-%m-%d"
+date "+%H:%M:%S"
+date -u "+%Y-%m-%d %H:%M:%S"
+
+ls -p
 ```
 **Вывод в эмуляторе (использовалась команда: `python3 src/main.py --config config.toml`):**
 ```text
 --- Отладочный вывод ---
-VFS Path: ./tests/vfs_deep.xml
-Script Path: ./tests/script_stage3.txt
+VFS Path: tests/vfs_files_stage4.xml
+Script Path: tests/script_stage4.txt
 ------------------
-Запуск стартового скрипта: ./tests/script_stage3.txt
+Запуск стартового скрипта: tests/script_stage4.txt
 $ ls
-d level1
-$ cd level1
+data.bin
+docs
+readme.txt
+uniq_test.txt
+$ ls -l
+-      6 data.bin
+d      0 docs
+-     12 readme.txt
+-     35 uniq_test.txt
+$ ls -a
+.hidden_file
+data.bin
+docs
+readme.txt
+uniq_test.txt
+$ cd docs
 $ ls
-d level2
-$ cd level2
-$ cd level3
-$ ls
-- deep_secret.txt
+info.txt
 $ cd ..
-$ cd ..
-$ cd ..
 $ ls
-d level1
-$ cd non_existent_dir
-cd: non_existent_dir: No such directory
+data.bin
+docs
+readme.txt
+uniq_test.txt
+$ cd /
+$ cd
+$ ls
+data.bin
+docs
+readme.txt
+uniq_test.txt
+$ uniq uniq_test.txt
+line1
+line2
+line3
+$ uniq -c uniq_test.txt
+      2 line1
+      3 line2
+      1 line3
+$ date
+Sun Oct 04 21:22:38  2026
+$ date -u
+Sun Oct 04 18:22:38 UTC 2026
+$ date "+%Y-%m-%d"
+2026-10-04
+$ date "+%H:%M:%S"
+21:22:38
+$ date -u "+%Y-%m-%d %H:%M:%S"
+2026-10-04 18:22:38
+$ ls -p
+ls: invalid option -- 'p'
 Скрипт остановлен из-за ошибки.
 ```

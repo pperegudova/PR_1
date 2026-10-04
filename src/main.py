@@ -7,15 +7,19 @@ import base64
 import tkinter as tk
 import xml.etree.ElementTree as ET
 from tkinter import scrolledtext
+from datetime import datetime, timezone
 
 UI_WIDTH = 60
 UI_HEIGHT = 20
 PROMPT = "$ "
+LS_LONG = "-l"
+LS_ALL = "-a"
+UNIQ_COUNT = "-c"
+DATE_UTC = "-u"
 
 
 class VFSNode:
     """Узел виртуальной файловой системы."""
-
     def __init__(self, name, is_dir, parent=None):
         self.name = name
         self.is_dir = is_dir
@@ -122,6 +126,30 @@ def merge_configs(toml_cfg: dict, cli_args: argparse.Namespace) -> dict:
     }
 
 
+def _parse_ls_args(args):
+    """Парсит аргументы ls, возвращает кортеж (flags, path)."""
+    flags = []
+    path = "."
+    for arg in args:
+        if arg.startswith("-"):
+            flags.append(arg)
+        else:
+            path = arg
+    return flags, path
+
+
+def _parse_uniq_args(args):
+    """Парсит аргументы uniq, возвращает кортеж (flags, path)."""
+    flags = []
+    path = None
+    for arg in args:
+        if arg.startswith("-"):
+            flags.append(arg)
+        else:
+            path = arg
+    return flags, path
+
+
 class ShellEmulator:
     """Класс, реализующий графический интерфейс эмулятора."""
 
@@ -170,6 +198,8 @@ class ShellEmulator:
         self.commands = {
             "ls": self._ls_cmd,
             "cd": self._cd_cmd,
+            "uniq": self._uniq_cmd,
+            "date": self._date_cmd,
             "exit": self._exit_cmd,
         }
 
@@ -237,8 +267,6 @@ class ShellEmulator:
                 continue
             elif part in current.children:
                 child = current.children[part]
-                if not child.is_dir:
-                    return None
                 current = child
             else:
                 return None
@@ -265,27 +293,138 @@ class ShellEmulator:
         return False
 
     def _ls_cmd(self, name: str, args: list) -> bool:
-        """Выводит содержимое текущей директории VFS."""
-        path = args[0] if args else "."
+        """Выводит содержимое текущей директории VFS с поддержкой флагов."""
+        flags, path = _parse_ls_args(args)
+        valid_flags = {LS_LONG, LS_ALL}
+        for flag in flags:
+            if flag not in valid_flags:
+                msg = f"ls: invalid option -- '{flag[1:]}'"
+                self._write_output(msg)
+                return False
         target = self._resolve_path(path)
         if not target or not target.is_dir:
             self._write_output(f"ls: cannot access '{path}'")
             return False
-        for child in target.children.values():
-            prefix = "d" if child.is_dir else "-"
-            self._write_output(f"{prefix} {child.name}")
+        show_all = LS_ALL in flags
+        long_fmt = LS_LONG in flags
+        children = target.children.values()
+        if not show_all:
+            children = [c for c in children
+                        if not c.name.startswith(".")]
+        for child in sorted(children, key=lambda c: c.name):
+            if long_fmt:
+                self._write_output(self._format_ls_long(child))
+            else:
+                self._write_output(child.name)
         return True
+
+    def _format_ls_long(self, node):
+        """Форматирует узел для вывода в длинном формате ls -l."""
+        type_char = "d" if node.is_dir else "-"
+        size = len(node.content) if not node.is_dir else 0
+        return f"{type_char} {size:>6} {node.name}"
 
     def _cd_cmd(self, name: str, args: list) -> bool:
         """Меняет текущую директорию в VFS."""
         if not args:
+            self.current_dir = self.vfs_root
             return True
         target = self._resolve_path(args[0])
         if target and target.is_dir:
             self.current_dir = target
             return True
-        self._write_output(f"cd: {args[0]}: No such directory")
+        self._write_output(
+            f"cd: {args[0]}: No such directory"
+        )
         return False
+
+    def _uniq_cmd(self, name: str, args: list) -> bool:
+        """Выводит уникальные строки из файла VFS."""
+        if not args:
+            self._write_output("uniq: missing file operand")
+            return False
+        flags, path = _parse_uniq_args(args)
+        valid_flags = {UNIQ_COUNT}
+        for flag in flags:
+            if flag not in valid_flags:
+                msg = f"uniq: invalid option -- '{flag[1:]}'"
+                self._write_output(msg)
+                return False
+        if path is None:
+            self._write_output("uniq: missing file operand")
+            return False
+        node = self._resolve_path(path)
+        if not node or node.is_dir:
+            msg = f"uniq: {path}: No such file"
+            self._write_output(msg)
+            return False
+        text = node.content.decode("utf-8", errors="replace")
+        lines = text.splitlines()
+        result = self._process_uniq(lines, flags)
+        for line in result:
+            self._write_output(line)
+        return True
+
+    def _process_uniq(self, lines: list, flags: list) -> list:
+        """Обрабатывает список строк по логике uniq."""
+        if not lines:
+            return []
+        result = []
+        count_flag = UNIQ_COUNT in flags
+        current = lines[0]
+        count = 1
+        for line in lines[1:]:
+            if line == current:
+                count += 1
+            else:
+                out = self._format_uniq_line(
+                    current, count, count_flag
+                )
+                result.append(out)
+                current = line
+                count = 1
+        out = self._format_uniq_line(
+            current, count, count_flag
+        )
+        result.append(out)
+        return result
+
+    def _format_uniq_line(
+        self, line: str, count: int, count_flag: bool
+    ) -> str:
+        """Форматирует одну строку для вывода uniq."""
+        if count_flag:
+            return f"{count:>7} {line}"
+        return line
+
+    def _date_cmd(self, name: str, args: list) -> bool:
+        """Выводит текущую дату и время системы."""
+        flags = [a for a in args if a.startswith("-")]
+        valid_flags = {DATE_UTC}
+        for flag in flags:
+            if flag not in valid_flags:
+                msg = f"date: invalid option -- '{flag[1:]}'"
+                self._write_output(msg)
+                return False
+        utc = DATE_UTC in flags
+        if utc:
+            now = datetime.now(timezone.utc)
+        else:
+            now = datetime.now()
+        fmt = self._get_date_format(args)
+        if fmt:
+            self._write_output(now.strftime(fmt))
+        else:
+            fmt_str = "%a %b %d %H:%M:%S %Z %Y"
+            self._write_output(now.strftime(fmt_str))
+        return True
+
+    def _get_date_format(self, args: list) -> str:
+        """Извлекает формат даты из аргументов после '+'."""
+        for arg in args:
+            if arg.startswith("+"):
+                return arg[1:]
+        return None
 
     def _exit_cmd(self, name: str, args: list) -> bool:
         """Завершает работу эмулятора."""

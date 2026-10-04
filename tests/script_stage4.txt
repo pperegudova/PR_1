@@ -1,0 +1,22 @@
+ls
+ls -l
+ls -a
+
+cd docs
+ls
+cd ..
+ls
+cd /
+cd
+ls
+
+uniq uniq_test.txt
+uniq -c uniq_test.txt
+
+date
+date -u
+date "+%Y-%m-%d"
+date "+%H:%M:%S"
+date -u "+%Y-%m-%d %H:%M:%S"
+
+ls -p
