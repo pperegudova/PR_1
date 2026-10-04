@@ -1,0 +1,9 @@
+<vfs name="root">
+    <dir name="level1">
+        <dir name="level2">
+            <dir name="level3">
+                <file name="deep_secret.txt">ZGVlcF9kYXRh</file>
+            </dir>
+        </dir>
+    </dir>
+</vfs>

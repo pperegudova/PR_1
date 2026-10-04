@@ -3,13 +3,51 @@ import sys
 import os
 import shlex
 import argparse
+import base64
 import tkinter as tk
+import xml.etree.ElementTree as ET
 from tkinter import scrolledtext
 
 UI_WIDTH = 60
 UI_HEIGHT = 20
 PROMPT = "$ "
-VFS_NAME = "VFS"
+
+
+class VFSNode:
+    """Узел виртуальной файловой системы."""
+
+    def __init__(self, name, is_dir, parent=None):
+        self.name = name
+        self.is_dir = is_dir
+        self.children = {}
+        self.content = b""
+        self.parent = parent
+
+
+def _parse_xml_node(xml_node, parent=None):
+    """Рекурсивно строит дерево VFS из XML узла."""
+    is_dir = xml_node.tag in ("dir", "vfs")
+    name = xml_node.get("name")
+    node = VFSNode(name, is_dir, parent)
+    if not is_dir and xml_node.text:
+        node.content = base64.b64decode(xml_node.text)
+    for child in xml_node:
+        child_node = _parse_xml_node(child, node)
+        node.children[child_node.name] = child_node
+    return node
+
+
+def load_vfs(xml_path):
+    """Загружает VFS из XML файла в память."""
+    if not xml_path or not os.path.exists(xml_path):
+        print(f"Error: VFS '{xml_path}' not found.")
+        return None
+    try:
+        tree = ET.parse(xml_path)
+        return _parse_xml_node(tree.getroot())
+    except Exception as e:
+        print(f"Error: Invalid VFS format. {e}")
+        return None
 
 
 def parse_command(raw_input: str) -> list:
@@ -93,7 +131,22 @@ class ShellEmulator:
         """
         self.root = root
         self.config = config
-        self.root.title(f"Эмулятор - {VFS_NAME}")
+
+        vfs_path = self.config.get("vfs_path")
+        self.vfs_root = load_vfs(vfs_path)
+
+        if not self.vfs_root:
+            self.vfs_root = VFSNode("root", True)
+
+        if vfs_path:
+            file_name = os.path.basename(vfs_path)
+            vfs_display_name, _ = os.path.splitext(file_name)
+        else:
+            vfs_display_name = "Default VFS"
+
+        self.root.title(f"Эмулятор - {vfs_display_name}")
+
+        self.current_dir = self.vfs_root
         self._setup_ui()
         self._register_commands()
         self._print_debug_info()
@@ -115,8 +168,8 @@ class ShellEmulator:
     def _register_commands(self):
         """Регистрирует доступные команды эмулятора."""
         self.commands = {
-            "ls": self._stub_cmd,
-            "cd": self._stub_cmd,
+            "ls": self._ls_cmd,
+            "cd": self._cd_cmd,
             "exit": self._exit_cmd,
         }
 
@@ -166,6 +219,31 @@ class ShellEmulator:
         self._write_output(f"{PROMPT}{raw}")
         self._execute(raw)
 
+    def _resolve_path(self, path_str):
+        """Ищет узел VFS по относительному или абсолютному пути."""
+        if path_str == "/":
+            return self.vfs_root
+        parts = path_str.strip("/").split("/")
+        current = self.vfs_root
+        if not path_str.startswith("/"):
+            current = self.current_dir
+        for part in parts:
+            if not part:
+                continue
+            if part == "..":
+                if current.parent:
+                    current = current.parent
+            elif part == ".":
+                continue
+            elif part in current.children:
+                child = current.children[part]
+                if not child.is_dir:
+                    return None
+                current = child
+            else:
+                return None
+        return current
+
     def _execute(self, raw_input: str) -> bool:
         """
         Выполняет распарсенную команду.
@@ -186,10 +264,28 @@ class ShellEmulator:
         self._write_output(msg)
         return False
 
-    def _stub_cmd(self, name: str, args: list) -> bool:
-        """Заглушка для команд ls и cd."""
-        self._write_output(f"{name}: {args}")
+    def _ls_cmd(self, name: str, args: list) -> bool:
+        """Выводит содержимое текущей директории VFS."""
+        path = args[0] if args else "."
+        target = self._resolve_path(path)
+        if not target or not target.is_dir:
+            self._write_output(f"ls: cannot access '{path}'")
+            return False
+        for child in target.children.values():
+            prefix = "d" if child.is_dir else "-"
+            self._write_output(f"{prefix} {child.name}")
         return True
+
+    def _cd_cmd(self, name: str, args: list) -> bool:
+        """Меняет текущую директорию в VFS."""
+        if not args:
+            return True
+        target = self._resolve_path(args[0])
+        if target and target.is_dir:
+            self.current_dir = target
+            return True
+        self._write_output(f"cd: {args[0]}: No such directory")
+        return False
 
     def _exit_cmd(self, name: str, args: list) -> bool:
         """Завершает работу эмулятора."""

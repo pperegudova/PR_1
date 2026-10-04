@@ -3,3 +3,6 @@
 readme_md.md
 __pycache__/
 *.pyc
+*.pyo
+*.swp
+.DS_Store

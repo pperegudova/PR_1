@@ -1,2 +1,2 @@
-vfs_path = "./default_vfs.xml"
-script_path = "./tests/script.txt"
+vfs_path = "./tests/vfs_deep.xml"
+script_path = "./tests/script_stage3.txt"

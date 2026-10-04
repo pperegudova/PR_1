@@ -1,0 +1,7 @@
+<vfs name="root">
+    <file name="readme.txt">SGVsbG8gV29ybGQh</file>
+    <file name="data.bin">AQIDBAUG</file>
+    <dir name="docs">
+        <file name="info.txt">VGVzdCBmaWxl</file>
+    </dir>
+</vfs>
